@@ -13,10 +13,15 @@ import (
 
 // Credits to: https://www.alexedwards.net/blog/how-to-hash-and-verify-passwords-with-argon2-in-go
 
+const (
+	maxArgonMemory = 256 * 1024 // KiB
+	maxArgonTime   = 10
+	minKeyLen      = 16
+	maxKeyLen      = 1024
+)
+
 // Argon2 hashing algorithm
 type Argon2 struct {
-	DK      []byte
-	Salt    []byte
 	Time    uint32
 	Memory  uint32
 	Threads uint8
@@ -39,83 +44,102 @@ func NewArgon2() *Argon2 {
 
 // Hash value using argon2 algorithm
 func (argon *Argon2) Hash(value string) (string, error) {
+	if err := argon.validateParams(); err != nil {
+		return "", err
+	}
+
 	salt, err := argon.SaltGen(argon.SaltLen)
 	if err != nil {
 		return "", err
 	}
 
-	argon.Salt = salt
+	dk := argon2.IDKey([]byte(value), salt, argon.Time, argon.Memory, argon.Threads, argon.KeyLen)
 
-	dk := argon2.IDKey([]byte(value), argon.Salt, argon.Time, argon.Memory, argon.Threads, argon.KeyLen)
-	argon.DK = dk
+	return fmt.Sprintf("%d$%d$%d$%d$%x$%x", argon2.Version, argon.Memory, argon.Time, argon.Threads, salt, dk), nil
+}
 
-	hashed := fmt.Sprintf("%d$%d$%d$%d$%x$%x", argon2.Version, argon.Memory, argon.Time, argon.Threads, argon.Salt, argon.DK)
+// validateParams guards against argon2 panics and unbounded cost
+func (argon *Argon2) validateParams() error {
+	switch {
+	case argon.Threads < 1:
+		return errors.New("argon2: threads must be at least 1")
+	case argon.Time < 1 || argon.Time > maxArgonTime:
+		return fmt.Errorf("argon2: time must be between 1 and %d", maxArgonTime)
+	case argon.Memory < 8*uint32(argon.Threads) || argon.Memory > maxArgonMemory:
+		return fmt.Errorf("argon2: memory must be between 8*threads and %d KiB", maxArgonMemory)
+	case argon.KeyLen < minKeyLen || argon.KeyLen > maxKeyLen:
+		return fmt.Errorf("argon2: key length must be between %d and %d", minKeyLen, maxKeyLen)
+	}
 
-	return hashed, nil
+	return nil
 }
 
 // Validate plain against hashed
 func (argon *Argon2) Validate(hashed, plain string) error {
-	existing, err := decodeArgonHash(hashed)
+	existing, salt, edk, err := decodeArgonHash(hashed)
 	if err != nil {
 		return err
 	}
 
-	dk := argon2.IDKey([]byte(plain), existing.Salt, existing.Time, existing.Memory, existing.Threads, existing.KeyLen)
+	dk := argon2.IDKey([]byte(plain), salt, existing.Time, existing.Memory, existing.Threads, existing.KeyLen)
 
-	if subtle.ConstantTimeCompare(existing.DK, dk) == 1 {
+	if subtle.ConstantTimeCompare(edk, dk) == 1 {
 		return nil
 	}
 
 	return errors.New("invalid hash")
 }
 
-// decodeArgonHash
-func decodeArgonHash(encodedHash string) (*Argon2, error) {
+// decodeArgonHash returns parsed params, salt and derived key
+func decodeArgonHash(encodedHash string) (*Argon2, []byte, []byte, error) {
 	values := strings.Split(encodedHash, "$")
 	if len(values) != 6 {
-		return nil, errors.New("invalid hash length")
+		return nil, nil, nil, errors.New("invalid hash length")
 	}
-
-	argon := &Argon2{}
 
 	version, err := strconv.Atoi(values[0])
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if version != argon2.Version {
-		return nil, errors.New("incompatible argon2 version")
+		return nil, nil, nil, errors.New("incompatible argon2 version")
 	}
 
-	memory, err := strconv.Atoi(values[1])
+	memory, err := strconv.ParseUint(values[1], 10, 32)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	argon.Memory = uint32(memory)
 
-	time, err := strconv.Atoi(values[2])
+	time, err := strconv.ParseUint(values[2], 10, 32)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	argon.Time = uint32(time)
 
-	threads, err := strconv.Atoi(values[3])
+	threads, err := strconv.ParseUint(values[3], 10, 8)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	argon.Threads = uint8(threads)
 
-	argon.Salt, err = hex.DecodeString(values[4])
+	salt, err := hex.DecodeString(values[4])
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	argon.SaltLen = len(argon.Salt)
 
-	argon.DK, err = hex.DecodeString(values[5])
+	dk, err := hex.DecodeString(values[5])
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	argon.KeyLen = uint32(len(argon.DK))
 
-	return argon, nil
+	argon := &Argon2{
+		Memory:  uint32(memory),
+		Time:    uint32(time),
+		Threads: uint8(threads),
+		SaltLen: len(salt),
+		KeyLen:  uint32(len(dk)),
+	}
+	if err = argon.validateParams(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return argon, salt, dk, nil
 }

@@ -41,7 +41,7 @@ func TestSCrypt_Hash_KeyGenerateFail(t *testing.T) {
 	scrypt.N = 0
 
 	_, err := scrypt.Hash("test-123")
-	assert.Equal(t, "scrypt: N must be > 1 and a power of 2", err.Error())
+	assert.Equal(t, "scrypt: N must be a power of 2 greater than 1", err.Error())
 }
 
 func TestSCrypt_Validate(t *testing.T) {
@@ -68,7 +68,7 @@ func TestSCrypt_Validate_KeyGenerateFail(t *testing.T) {
 
 	hashed := "0$8$1$73616c74$2560437b98f140fbf72bff2290d772c2593c1ea4dd2206b6b0dfbdc025bcced5"
 	err := scrypt.Validate(hashed, "test-123")
-	assert.Equal(t, "scrypt: N must be > 1 and a power of 2", err.Error())
+	assert.Equal(t, "scrypt: N must be a power of 2 greater than 1", err.Error())
 }
 
 func TestSCrypt_Validate_InvalidHashLength(t *testing.T) {
@@ -123,4 +123,16 @@ func TestSCrypt_Validate_InvalidDK(t *testing.T) {
 	hashed := "32768$8$1$73616c74$_"
 	err := scrypt.Validate(hashed, "test-123")
 	assert.Equal(t, "encoding/hex: invalid byte: U+005F '_'", err.Error())
+}
+
+func TestSCrypt_Validate_UnsafeParams(t *testing.T) {
+	scrypt := crypto.NewSCrypt()
+
+	for _, hashed := range []string{
+		"1048576$8$1$73616c74$d8801786d6416fb063115b1b997ef50a",
+		"32768$8$1000$73616c74$d8801786d6416fb063115b1b997ef50a",
+		"32768$8$1$73616c74$",
+	} {
+		assert.Error(t, scrypt.Validate(hashed, "x"), hashed)
+	}
 }

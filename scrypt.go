@@ -13,10 +13,10 @@ import (
 
 // Credits to: https://github.com/elithrar/simple-scrypt/blob/master/scrypt.go
 
+const maxScryptMemory = 256 << 20 // bytes
+
 // SCrypt hashing algorithm
 type SCrypt struct {
-	DK      []byte
-	Salt    []byte
 	N       int // 32768, should be the highest power of 2 derived within 100 milliseconds
 	R       int // 8
 	P       int // 1
@@ -39,81 +39,95 @@ func NewSCrypt() *SCrypt {
 
 // Hash sCrypt.Plain
 func (sCrypt *SCrypt) Hash(value string) (string, error) {
+	if err := sCrypt.validateParams(); err != nil {
+		return "", err
+	}
+
 	salt, err := sCrypt.SaltGen(sCrypt.SaltLen)
 	if err != nil {
 		return "", err
 	}
 
-	sCrypt.Salt = salt
-
-	dk, err := scrypt.Key([]byte(value), sCrypt.Salt, sCrypt.N, sCrypt.R, sCrypt.P, sCrypt.KeyLen)
+	dk, err := scrypt.Key([]byte(value), salt, sCrypt.N, sCrypt.R, sCrypt.P, sCrypt.KeyLen)
 	if err != nil {
 		return "", err
 	}
-	sCrypt.DK = dk
 
-	hashed := fmt.Sprintf("%d$%d$%d$%x$%x", sCrypt.N, sCrypt.R, sCrypt.P, sCrypt.Salt, sCrypt.DK)
+	return fmt.Sprintf("%d$%d$%d$%x$%x", sCrypt.N, sCrypt.R, sCrypt.P, salt, dk), nil
+}
 
-	return hashed, nil
+// validateParams guards against unbounded cost
+func (sCrypt *SCrypt) validateParams() error {
+	switch {
+	case sCrypt.N < 2 || sCrypt.N&(sCrypt.N-1) != 0:
+		return errors.New("scrypt: N must be a power of 2 greater than 1")
+	case sCrypt.R < 1 || sCrypt.R > 32 || sCrypt.P < 1 || sCrypt.P > 16:
+		return errors.New("scrypt: R must be 1-32 and P must be 1-16")
+	case sCrypt.N > maxScryptMemory/128/sCrypt.R:
+		return fmt.Errorf("scrypt: memory 128*N*R exceeds %d bytes", maxScryptMemory)
+	case sCrypt.KeyLen < minKeyLen || sCrypt.KeyLen > maxKeyLen:
+		return fmt.Errorf("scrypt: key length must be between %d and %d", minKeyLen, maxKeyLen)
+	}
+
+	return nil
 }
 
 // Validate sCrypt.Plain against sCrypt.Hashed
 func (sCrypt *SCrypt) Validate(hashed, plain string) error {
-	existing, err := decodeSCryptHash(hashed)
+	existing, salt, edk, err := decodeSCryptHash(hashed)
 	if err != nil {
 		return err
 	}
 
-	dk, err := scrypt.Key([]byte(plain), existing.Salt, existing.N, existing.R, existing.P, existing.KeyLen)
+	dk, err := scrypt.Key([]byte(plain), salt, existing.N, existing.R, existing.P, existing.KeyLen)
 	if err != nil {
 		return err
 	}
 
-	if subtle.ConstantTimeCompare(existing.DK, dk) == 1 {
+	if subtle.ConstantTimeCompare(edk, dk) == 1 {
 		return nil
 	}
 
 	return errors.New("invalid hash")
 }
 
-// decodeSCryptHash
-func decodeSCryptHash(hash string) (*SCrypt, error) {
+// decodeSCryptHash returns parsed params, salt and derived key
+func decodeSCryptHash(hash string) (*SCrypt, []byte, []byte, error) {
 	values := strings.Split(hash, "$")
 
-	// P, N, R, Salt, scrypt derived key
+	// N, R, P, Salt, scrypt derived key
 	if len(values) != 5 {
-		return nil, errors.New("invalid hash length")
+		return nil, nil, nil, errors.New("invalid hash length")
 	}
 
 	sCrypt := &SCrypt{}
 	var err error
 
-	sCrypt.N, err = strconv.Atoi(values[0])
-	if err != nil {
-		return nil, err
+	if sCrypt.N, err = strconv.Atoi(values[0]); err != nil {
+		return nil, nil, nil, err
+	}
+	if sCrypt.R, err = strconv.Atoi(values[1]); err != nil {
+		return nil, nil, nil, err
+	}
+	if sCrypt.P, err = strconv.Atoi(values[2]); err != nil {
+		return nil, nil, nil, err
 	}
 
-	sCrypt.R, err = strconv.Atoi(values[1])
+	salt, err := hex.DecodeString(values[3])
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
+	}
+	sCrypt.SaltLen = len(salt)
+
+	dk, err := hex.DecodeString(values[4])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sCrypt.KeyLen = len(dk)
+
+	if err = sCrypt.validateParams(); err != nil {
+		return nil, nil, nil, err
 	}
 
-	sCrypt.P, err = strconv.Atoi(values[2])
-	if err != nil {
-		return nil, err
-	}
-
-	sCrypt.Salt, err = hex.DecodeString(values[3])
-	if err != nil {
-		return nil, err
-	}
-	sCrypt.SaltLen = len(sCrypt.Salt)
-
-	sCrypt.DK, err = hex.DecodeString(values[4])
-	if err != nil {
-		return nil, err
-	}
-	sCrypt.KeyLen = len(sCrypt.DK)
-
-	return sCrypt, nil
+	return sCrypt, salt, dk, nil
 }

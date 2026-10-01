@@ -1,17 +1,72 @@
 package crypto_test
 
 import (
+	"testing"
+
 	"github.com/gobackpack/crypto"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
-func TestCBC_Encrypt(t *testing.T) {
-	cbc := crypto.NewCBC("3t6w9z$C&F)J@NcR", "KbPeShVmYq3t6w9z")
+const cbcKey = "3t6w9z$C&F)J@NcR"
 
-	encryptedRaw, encryptedHex, err := cbc.Encrypt([]byte("test-123"))
+func TestCBC_RoundTrip(t *testing.T) {
+	cbc := crypto.NewCBC(cbcKey)
+
+	raw, hexed, err := cbc.Encrypt([]byte("test-123"))
 	assert.NoError(t, err)
 
-	assert.Equal(t, "\x1c\xefi\xbb5I\xdd\xe3\xd6w\x13=y\xd5\x05:", encryptedRaw)
-	assert.Equal(t, "1cef69bb3549dde3d677133d79d5053a", encryptedHex)
+	decrypted, err := cbc.Decrypt(raw)
+	assert.NoError(t, err)
+	assert.Equal(t, "test-123", decrypted)
+
+	decrypted, err = cbc.DecryptHex(hexed)
+	assert.NoError(t, err)
+	assert.Equal(t, "test-123", decrypted)
+}
+
+func TestCBC_RandomIV(t *testing.T) {
+	cbc := crypto.NewCBC(cbcKey)
+
+	a, _, _ := cbc.Encrypt([]byte("test-123"))
+	b, _, _ := cbc.Encrypt([]byte("test-123"))
+	assert.NotEqual(t, a, b)
+}
+
+func TestCBC_Tampered(t *testing.T) {
+	cbc := crypto.NewCBC(cbcKey)
+
+	raw, _, _ := cbc.Encrypt([]byte("test-123"))
+	b := []byte(raw)
+	b[20] ^= 1
+
+	_, err := cbc.Decrypt(string(b))
+	assert.EqualError(t, err, "authentication failed")
+}
+
+func TestCBC_WrongKey(t *testing.T) {
+	raw, _, _ := crypto.NewCBC(cbcKey).Encrypt([]byte("test-123"))
+
+	_, err := crypto.NewCBC("AAAAAAAAAAAAAAAA").Decrypt(raw)
+	assert.EqualError(t, err, "authentication failed")
+}
+
+func TestCBC_InvalidInput(t *testing.T) {
+	cbc := crypto.NewCBC(cbcKey)
+
+	_, err := cbc.Decrypt("short")
+	assert.Error(t, err)
+
+	_, err = cbc.Decrypt(string(make([]byte, 81)))
+	assert.Error(t, err)
+
+	_, err = cbc.DecryptHex("zz")
+	assert.Error(t, err)
+}
+
+func TestCBC_InvalidKey(t *testing.T) {
+	_, _, err := crypto.NewCBC("short").Encrypt([]byte("a"))
+	assert.Error(t, err)
+
+	_, err = crypto.NewCBC("short").Decrypt("a")
+	assert.Error(t, err)
 }

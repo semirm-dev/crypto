@@ -21,8 +21,13 @@ func NewGCM(secret string) *GCM {
 	}
 }
 
-// Encrypt payload using AES GCM encryption mode
+// Encrypt payload using AES GCM encryption mode, returns raw, hex and base64 encoded output
 func (gcmEnc *GCM) Encrypt(payload []byte) (string, string, string, error) {
+	return gcmEnc.EncryptAAD(payload, nil)
+}
+
+// EncryptAAD is Encrypt with additional authenticated data, which must be passed to DecryptAAD
+func (gcmEnc *GCM) EncryptAAD(payload, aad []byte) (string, string, string, error) {
 	key := []byte(gcmEnc.Secret)
 
 	block, err := aes.NewCipher(key)
@@ -40,13 +45,38 @@ func (gcmEnc *GCM) Encrypt(payload []byte) (string, string, string, error) {
 		return "", "", "", err
 	}
 
-	encrypted := gcm.Seal(nonce, nonce, payload, nil)
+	encrypted := gcm.Seal(nonce, nonce, payload, aad)
 
 	return string(encrypted), hex.EncodeToString(encrypted), base64.URLEncoding.EncodeToString(encrypted), nil
 }
 
-// Decrypt AES GCM encrypted input
+// Decrypt raw output of Encrypt
 func (gcmEnc *GCM) Decrypt(payload string) (string, error) {
+	return gcmEnc.DecryptAAD(payload, nil)
+}
+
+// DecryptHex decrypts hex encoded output of Encrypt
+func (gcmEnc *GCM) DecryptHex(payload string) (string, error) {
+	raw, err := hex.DecodeString(payload)
+	if err != nil {
+		return "", err
+	}
+
+	return gcmEnc.Decrypt(string(raw))
+}
+
+// DecryptBase64 decrypts base64 (URL encoding) output of Encrypt
+func (gcmEnc *GCM) DecryptBase64(payload string) (string, error) {
+	raw, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return "", err
+	}
+
+	return gcmEnc.Decrypt(string(raw))
+}
+
+// DecryptAAD is Decrypt with additional authenticated data
+func (gcmEnc *GCM) DecryptAAD(payload string, aad []byte) (string, error) {
 	key := []byte(gcmEnc.Secret)
 
 	block, err := aes.NewCipher(key)
@@ -68,7 +98,7 @@ func (gcmEnc *GCM) Decrypt(payload string) (string, error) {
 
 	nonce, encrypted := byteIn[:nonceSize], byteIn[nonceSize:]
 
-	decrypted, err := gcm.Open(nil, nonce, encrypted, nil)
+	decrypted, err := gcm.Open(nil, nonce, encrypted, aad)
 	if err != nil {
 		return "", err
 	}

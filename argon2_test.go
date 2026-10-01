@@ -86,7 +86,7 @@ func TestArgon2_Validate_InvalidMemory(t *testing.T) {
 
 	hashed := "19$_$3$2$73616c74$d8801786d6416fb063115b1b997ef50a56cd862a5e59062e2c6aadd301be102e"
 	err := argon2.Validate(hashed, "test-123")
-	assert.Equal(t, "strconv.Atoi: parsing \"_\": invalid syntax", err.Error())
+	assert.Equal(t, "strconv.ParseUint: parsing \"_\": invalid syntax", err.Error())
 }
 
 func TestArgon2_Validate_InvalidTime(t *testing.T) {
@@ -95,7 +95,7 @@ func TestArgon2_Validate_InvalidTime(t *testing.T) {
 
 	hashed := "19$65536$_$2$73616c74$d8801786d6416fb063115b1b997ef50a56cd862a5e59062e2c6aadd301be102e"
 	err := argon2.Validate(hashed, "test-123")
-	assert.Equal(t, "strconv.Atoi: parsing \"_\": invalid syntax", err.Error())
+	assert.Equal(t, "strconv.ParseUint: parsing \"_\": invalid syntax", err.Error())
 }
 
 func TestArgon2_Validate_InvalidThread(t *testing.T) {
@@ -104,7 +104,7 @@ func TestArgon2_Validate_InvalidThread(t *testing.T) {
 
 	hashed := "19$65536$3$_$73616c74$d8801786d6416fb063115b1b997ef50a56cd862a5e59062e2c6aadd301be102e"
 	err := argon2.Validate(hashed, "test-123")
-	assert.Equal(t, "strconv.Atoi: parsing \"_\": invalid syntax", err.Error())
+	assert.Equal(t, "strconv.ParseUint: parsing \"_\": invalid syntax", err.Error())
 }
 
 func TestArgon2_Validate_InvalidSalt(t *testing.T) {
@@ -123,4 +123,34 @@ func TestArgon2_Validate_InvalidDK(t *testing.T) {
 	hashed := "19$65536$3$2$73616c74$_"
 	err := argon2.Validate(hashed, "test-123")
 	assert.Equal(t, "encoding/hex: invalid byte: U+005F '_'", err.Error())
+}
+
+func TestArgon2_Validate_UnsafeParams(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+
+	for _, hashed := range []string{
+		"19$65536$3$0$73616c74$d8801786d6416fb063115b1b997ef50a",
+		"19$65536$0$2$73616c74$d8801786d6416fb063115b1b997ef50a",
+		"19$65536$3$256$73616c74$d8801786d6416fb063115b1b997ef50a",
+		"19$4194304$3$2$73616c74$d8801786d6416fb063115b1b997ef50a",
+		"19$65536$3$2$73616c74$",
+	} {
+		assert.NotPanics(t, func() { assert.Error(t, argon2.Validate(hashed, "x")) }, hashed)
+	}
+}
+
+func TestArgon2_Hash_InvalidParams(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+	argon2.Threads = 0
+
+	_, err := argon2.Hash("x")
+	assert.Error(t, err)
+}
+
+func TestArgon2_Hash_Stateless(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+
+	a, _ := argon2.Hash("x")
+	b, _ := argon2.Hash("x")
+	assert.NotEqual(t, a, b)
 }

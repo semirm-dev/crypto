@@ -4,61 +4,66 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"hash"
+	"io"
 )
 
-// CBC encryption
+// CBC encryption. Output is IV || ciphertext || HMAC-SHA256 (encrypt-then-MAC).
+// Prefer GCM for new code.
 type CBC struct {
-	Secret string
-	IV     string
+	Secret string // AES key: 16, 24 or 32 bytes
 }
 
-func NewCBC(secret, iv string) *CBC {
-	return &CBC{
-		Secret: secret,
-		IV:     iv,
-	}
+func NewCBC(secret string) *CBC {
+	return &CBC{Secret: secret}
 }
 
-// Encrypt content using AES encryption CBC mode
+// Encrypt content using AES encryption CBC mode with random IV, returns raw and hex encoded output
 func (cbcEnc *CBC) Encrypt(content []byte) (string, string, error) {
-	key := []byte(cbcEnc.Secret)
-
-	block, err := aes.NewCipher(key)
+	block, err := aes.NewCipher([]byte(cbcEnc.Secret))
 	if err != nil {
 		return "", "", err
 	}
 
 	byteIn := pkcsPad(content, aes.BlockSize)
-	encrypted := make([]byte, len(byteIn))
-	byteIV := []byte(cbcEnc.IV)
+	out := make([]byte, aes.BlockSize+len(byteIn), aes.BlockSize+len(byteIn)+sha256.Size)
 
-	mode := cipher.NewCBCEncrypter(block, byteIV)
-	mode.CryptBlocks(encrypted, byteIn)
+	iv := out[:aes.BlockSize]
+	if _, err = io.ReadFull(rand.Reader, iv); err != nil {
+		return "", "", err
+	}
 
-	return string(encrypted), hex.EncodeToString(encrypted), nil
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(out[aes.BlockSize:], byteIn)
+	out = cbcEnc.mac(out).Sum(out)
+
+	return string(out), hex.EncodeToString(out), nil
 }
 
-// Decrypt AES CBC encrypted input
+// Decrypt raw output of Encrypt
 func (cbcEnc *CBC) Decrypt(encrypted string) (string, error) {
-	key := []byte(cbcEnc.Secret)
-
-	block, err := aes.NewCipher(key)
+	block, err := aes.NewCipher([]byte(cbcEnc.Secret))
 	if err != nil {
 		return "", err
 	}
 
 	byteIn := []byte(encrypted)
-	if len(byteIn) < aes.BlockSize {
-		return "", errors.New("encrypted text too short")
+	if len(byteIn) < 2*aes.BlockSize+sha256.Size || (len(byteIn)-sha256.Size)%aes.BlockSize != 0 {
+		return "", errors.New("invalid encrypted text length")
 	}
 
-	decrypted := make([]byte, len(byteIn))
-	byteIV := []byte(cbcEnc.IV)
+	body, tag := byteIn[:len(byteIn)-sha256.Size], byteIn[len(byteIn)-sha256.Size:]
+	if !hmac.Equal(cbcEnc.mac(body).Sum(nil), tag) {
+		return "", errors.New("authentication failed")
+	}
 
-	mode := cipher.NewCBCDecrypter(block, byteIV)
-	mode.CryptBlocks(decrypted, byteIn)
+	iv, ct := body[:aes.BlockSize], body[aes.BlockSize:]
+	decrypted := make([]byte, len(ct))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(decrypted, ct)
 
 	decrypted, err = pkcsUnPad(decrypted, aes.BlockSize)
 	if err != nil {
@@ -68,13 +73,34 @@ func (cbcEnc *CBC) Decrypt(encrypted string) (string, error) {
 	return string(decrypted), nil
 }
 
+// DecryptHex decrypts hex encoded output of Encrypt
+func (cbcEnc *CBC) DecryptHex(encrypted string) (string, error) {
+	raw, err := hex.DecodeString(encrypted)
+	if err != nil {
+		return "", err
+	}
+
+	return cbcEnc.Decrypt(string(raw))
+}
+
+// mac returns HMAC primed with data, keyed by a key derived from Secret
+func (cbcEnc *CBC) mac(data []byte) hash.Hash {
+	kdf := hmac.New(sha256.New, []byte(cbcEnc.Secret))
+	kdf.Write([]byte("cbc-mac-key"))
+
+	m := hmac.New(sha256.New, kdf.Sum(nil))
+	m.Write(data)
+
+	return m
+}
+
 // pkcsPad for non-full length blocks.
 // pkcs5 or pkcs7 will be used based on block size
 func pkcsPad(ciphertext []byte, blockSize int) []byte {
 	padding := blockSize - len(ciphertext)%blockSize
 	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
 
-	return append(ciphertext, padtext...)
+	return append(append([]byte{}, ciphertext...), padtext...)
 }
 
 // pkcsUnPad will remove PKCS5 padding.
@@ -87,7 +113,7 @@ func pkcsUnPad(input []byte, blockSize int) ([]byte, error) {
 
 	pad := input[inputLen-1]
 	padLen := int(pad)
-	if padLen > inputLen || padLen > blockSize {
+	if padLen == 0 || padLen > inputLen || padLen > blockSize {
 		return nil, errors.New("cryptgo/padding: invalid padding size")
 	}
 

@@ -24,7 +24,7 @@ func TestBCrypt_Hash_InvalidCost(t *testing.T) {
 	bcrypt.Cost = 9999
 
 	hashed, err := bcrypt.Hash("test-123")
-	assert.Equal(t, "crypto/bcrypt: cost 9999 is outside allowed range (4,31)", err.Error())
+	assert.Equal(t, "crypto/bcrypt: cost 9999 is outside allowed inclusive range 4..31", err.Error())
 	assert.Empty(t, hashed)
 }
 
