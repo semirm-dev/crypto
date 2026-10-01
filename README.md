@@ -1,4 +1,4 @@
-![alt Go](https://img.shields.io/github/go-mod/go-version/gobackpack/crypto)
+![Go](https://img.shields.io/github/go-mod/go-version/semirm-dev/crypto)
 
 Password hashing (Argon2id, scrypt, bcrypt) and authenticated encryption (AES-GCM, AES-CBC+HMAC) with safe defaults.
 
