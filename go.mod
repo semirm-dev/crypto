@@ -1,4 +1,4 @@
-module github.com/gobackpack/crypto
+module github.com/semirm-dev/crypto
 
 go 1.27.1
 
