@@ -23,8 +23,8 @@ func TestArgon2_Hash(t *testing.T) {
 	hashed, err := argon2.Hash("test-123")
 	assert.NoError(t, err)
 
-	expected := "19$65536$3$2$73616c74$d8801786d6416fb063115b1b997ef50a56cd862a5e59062e2c6aadd301be102e"
-	assert.Equal(t, expected, hashed)
+	assert.Regexp(t, `^\$argon2id\$v=19\$m=65536,t=3,p=2\$`, hashed)
+	assert.NoError(t, argon2.Validate(hashed, "test-123"))
 }
 
 func TestArgon2_Hash_SaltGenFail(t *testing.T) {
@@ -153,4 +153,49 @@ func TestArgon2_Hash_Stateless(t *testing.T) {
 	a, _ := argon2.Hash("x")
 	b, _ := argon2.Hash("x")
 	assert.NotEqual(t, a, b)
+}
+
+// reference value computed with OpenSSL 3.5 (openssl kdf ARGON2ID)
+const argon2OpenSSL = "$argon2id$v=19$m=65536,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$fPT0u9P4JBezKhy07/DIjAJxHEFQAzSXWRzMd9zRXYA"
+
+func TestArgon2_Validate_PHC_OpenSSLVector(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+
+	assert.NoError(t, argon2.Validate(argon2OpenSSL, "test-123"))
+	assert.Equal(t, crypto.ErrMismatch, argon2.Validate(argon2OpenSSL, "test-124"))
+}
+
+func TestArgon2_Validate_PHC_Invalid(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+
+	for _, hashed := range []string{
+		"$argon2i$v=19$m=65536,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=18$m=65536,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=x$m=65536,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=19$m=65536,t=3$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=19$m=65536,t=3,p=2junk$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=19$m=65536,t=3,p=2$!!$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"$argon2id$v=19$m=65536,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$!!",
+		"$argon2id$v=19$m=65536,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg",
+		"$argon2id$v=19$m=4194304,t=3,p=2$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+	} {
+		assert.Error(t, argon2.Validate(hashed, "x"), hashed)
+	}
+}
+
+func TestArgon2_Hash_SaltTooShort(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+	argon2.SaltLen = 0
+
+	_, err := argon2.Hash("x")
+	assert.Error(t, err)
+}
+
+func TestArgon2_Hash_NilSaltGen(t *testing.T) {
+	argon2 := crypto.NewArgon2()
+	argon2.SaltGen = nil
+
+	hashed, err := argon2.Hash("x")
+	assert.NoError(t, err)
+	assert.NoError(t, argon2.Validate(hashed, "x"))
 }

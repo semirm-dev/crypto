@@ -22,3 +22,8 @@ func TestGenerateSalt(t *testing.T) {
 	assert.NotEmpty(t, salt)
 	assert.Len(t, salt, 10)
 }
+
+func TestGenerateSalt_Negative(t *testing.T) {
+	_, err := crypto.GenerateSalt(-1)
+	assert.Error(t, err)
+}

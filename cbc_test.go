@@ -70,3 +70,12 @@ func TestCBC_InvalidKey(t *testing.T) {
 	_, err = crypto.NewCBC("short").Decrypt("a")
 	assert.Error(t, err)
 }
+
+// reference value built with Python cryptography (AES-CBC PKCS7 + HMAC-SHA256, IV 00..0f)
+func TestCBC_ReferenceVector(t *testing.T) {
+	cbc := crypto.NewCBC(cbcKey)
+
+	decrypted, err := cbc.DecryptHex("000102030405060708090a0b0c0d0e0fbe6aa1509194c897c9308123a9c20777c80ddfd35e955104a57cdea5d973196c22d6b5f98f999f9b09424874ebba9830")
+	assert.NoError(t, err)
+	assert.Equal(t, "test-123", decrypted)
+}

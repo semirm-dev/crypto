@@ -43,3 +43,23 @@ func TestBCrypt_Validate_Failed(t *testing.T) {
 	err := bcrypt.Validate(hashed, "different")
 	assert.Equal(t, "crypto/bcrypt: hashedPassword is not the hash of the given password", err.Error())
 }
+
+// reference hash generated with Python bcrypt
+func TestBCrypt_ReferenceVector(t *testing.T) {
+	bcrypt := crypto.NewBCrypt()
+
+	assert.NoError(t, bcrypt.Validate("$2b$10$cfbrCNkE/jOpUw8oDO6rWORakBkVoI1XW9TX1bQ2wbLmmeBmua03O", "test-123"))
+}
+
+func TestBCrypt_RoundTrip(t *testing.T) {
+	bcrypt := crypto.NewBCrypt()
+
+	hashed, err := bcrypt.Hash("x")
+	assert.NoError(t, err)
+	assert.NoError(t, bcrypt.Validate(hashed, "x"))
+}
+
+func TestBCrypt_Hash_TooLong(t *testing.T) {
+	_, err := crypto.NewBCrypt().Hash(string(make([]byte, 73)))
+	assert.Error(t, err)
+}

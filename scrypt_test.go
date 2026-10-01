@@ -136,3 +136,32 @@ func TestSCrypt_Validate_UnsafeParams(t *testing.T) {
 		assert.Error(t, scrypt.Validate(hashed, "x"), hashed)
 	}
 }
+
+// reference values computed with Python hashlib.scrypt (OpenSSL)
+func TestSCrypt_ReferenceVector(t *testing.T) {
+	scrypt := crypto.NewSCrypt()
+
+	// salt "salt" is 4 bytes, so only Validate (not Hash) accepts it
+	assert.NoError(t, scrypt.Validate("32768$8$1$73616c74$2560437b98f140fbf72bff2290d772c2593c1ea4dd2206b6b0dfbdc025bcced5", "test-123"))
+
+	// RFC 7914 section 12 vector 3 (N=16384, r=8, p=1, 64 byte key)
+	rfc := "16384$8$1$536f6469756d43686c6f72696465$7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2d5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887"
+	assert.NoError(t, scrypt.Validate(rfc, "pleaseletmein"))
+}
+
+func TestSCrypt_Hash_SaltTooShort(t *testing.T) {
+	scrypt := crypto.NewSCrypt()
+	scrypt.SaltLen = 0
+
+	_, err := scrypt.Hash("x")
+	assert.Error(t, err)
+}
+
+func TestSCrypt_Hash_RoundTrip(t *testing.T) {
+	scrypt := crypto.NewSCrypt()
+
+	hashed, err := scrypt.Hash("x")
+	assert.NoError(t, err)
+	assert.NoError(t, scrypt.Validate(hashed, "x"))
+	assert.Equal(t, crypto.ErrMismatch, scrypt.Validate(hashed, "y"))
+}

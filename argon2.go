@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -48,14 +49,15 @@ func (argon *Argon2) Hash(value string) (string, error) {
 		return "", err
 	}
 
-	salt, err := argon.SaltGen(argon.SaltLen)
+	salt, err := newSalt(argon.SaltLen, argon.SaltGen)
 	if err != nil {
 		return "", err
 	}
 
 	dk := argon2.IDKey([]byte(value), salt, argon.Time, argon.Memory, argon.Threads, argon.KeyLen)
 
-	return fmt.Sprintf("%d$%d$%d$%d$%x$%x", argon2.Version, argon.Memory, argon.Time, argon.Threads, salt, dk), nil
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argon.Memory, argon.Time, argon.Threads,
+		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(dk)), nil
 }
 
 // validateParams guards against argon2 panics and unbounded cost
@@ -87,11 +89,58 @@ func (argon *Argon2) Validate(hashed, plain string) error {
 		return nil
 	}
 
-	return errors.New("invalid hash")
+	return ErrMismatch
 }
 
-// decodeArgonHash returns parsed params, salt and derived key
+// decodePHCArgonHash parses $argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash>
+func decodePHCArgonHash(encodedHash string) (*Argon2, []byte, []byte, error) {
+	values := strings.Split(encodedHash, "$")
+	if len(values) != 6 || values[1] != "argon2id" {
+		return nil, nil, nil, errors.New("invalid hash")
+	}
+
+	var version int
+	if _, err := fmt.Sscanf(values[2], "v=%d", &version); err != nil {
+		return nil, nil, nil, err
+	}
+	if version != argon2.Version {
+		return nil, nil, nil, errors.New("incompatible argon2 version")
+	}
+
+	var memory, time uint32
+	var threads uint8
+	if _, err := fmt.Sscanf(values[3], "m=%d,t=%d,p=%d", &memory, &time, &threads); err != nil {
+		return nil, nil, nil, err
+	}
+
+	salt, err := base64.RawStdEncoding.Strict().DecodeString(values[4])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	dk, err := base64.RawStdEncoding.Strict().DecodeString(values[5])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if values[3] != fmt.Sprintf("m=%d,t=%d,p=%d", memory, time, threads) {
+		return nil, nil, nil, errors.New("invalid hash params")
+	}
+
+	argon := &Argon2{Memory: memory, Time: time, Threads: threads, SaltLen: len(salt), KeyLen: uint32(len(dk))}
+	if err = argon.validateParams(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return argon, salt, dk, nil
+}
+
+// decodeArgonHash parses PHC string or legacy hex format (version$m$t$p$salt$hash)
 func decodeArgonHash(encodedHash string) (*Argon2, []byte, []byte, error) {
+	if strings.HasPrefix(encodedHash, "$") {
+		return decodePHCArgonHash(encodedHash)
+	}
+
 	values := strings.Split(encodedHash, "$")
 	if len(values) != 6 {
 		return nil, nil, nil, errors.New("invalid hash length")

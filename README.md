@@ -13,6 +13,9 @@ plain, err := gcm.DecryptBase64(b64)
 ```
 
 #### Notes
+- Argon2 hashes are standard PHC strings (`$argon2id$v=19$m=65536,t=3,p=2$salt$hash`), verified against OpenSSL. The legacy `version$m$t$p$salt$hash` hex format is still accepted by `Validate`. scrypt output is `N$r$p$salt$key` (hex); scrypt is verified against RFC 7914 and bcrypt against Python `bcrypt`.
+- `Validate` returns `ErrMismatch` on a wrong password. Salts must be at least 8 bytes.
+- `GCM` uses random 96-bit nonces: rotate the key before ~2^32 messages.
 - `Hash` does not mutate the receiver, instances are safe to share between goroutines.
 - `Validate` rejects hashes whose cost parameters are out of bounds (Argon2 memory <= 256 MiB, time <= 10; scrypt 128*N*R <= 256 MiB) to prevent DoS from untrusted hashes. Argon2 hashing is memory heavy (64 MiB by default), limit concurrent hashes in servers.
 - Secrets are raw AES keys, not passphrases. Derive them with a KDF first if needed.

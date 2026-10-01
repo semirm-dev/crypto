@@ -1,6 +1,7 @@
 package crypto_test
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/gobackpack/crypto"
@@ -77,4 +78,14 @@ func TestGCM_InvalidInput(t *testing.T) {
 
 	_, err = crypto.NewGCM("short").Decrypt("a")
 	assert.Error(t, err)
+}
+
+// reference value from Python cryptography AESGCM, nonce 00..0b, aad "ctx"
+func TestGCM_ReferenceVector(t *testing.T) {
+	gcm := crypto.NewGCM(cbcKey)
+
+	raw, _ := hex.DecodeString("000102030405060708090a0be18ba3bf8aeba0305005b0b7e5375acee682d8e7edf2ce64")
+	decrypted, err := gcm.DecryptAAD(string(raw), []byte("ctx"))
+	assert.NoError(t, err)
+	assert.Equal(t, "test-123", decrypted)
 }

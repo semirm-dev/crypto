@@ -43,7 +43,7 @@ func (sCrypt *SCrypt) Hash(value string) (string, error) {
 		return "", err
 	}
 
-	salt, err := sCrypt.SaltGen(sCrypt.SaltLen)
+	salt, err := newSalt(sCrypt.SaltLen, sCrypt.SaltGen)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +88,7 @@ func (sCrypt *SCrypt) Validate(hashed, plain string) error {
 		return nil
 	}
 
-	return errors.New("invalid hash")
+	return ErrMismatch
 }
 
 // decodeSCryptHash returns parsed params, salt and derived key
