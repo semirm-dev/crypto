@@ -1,65 +1,39 @@
-package crypto_test
+package crypto
 
 import (
-	"github.com/gobackpack/crypto"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestNewBCrypt(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
-	assert.Equal(t, 10, bcrypt.Cost)
-}
+// generated with Python bcrypt
+const bcryptRef = "$2b$10$cfbrCNkE/jOpUw8oDO6rWORakBkVoI1XW9TX1bQ2wbLmmeBmua03O"
 
-func TestBCrypt_Hash(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
+func TestBCrypt(t *testing.T) {
+	b := NewBCrypt()
+	assert.Equal(t, 12, b.Cost)
 
-	hashed, err := bcrypt.Hash("test-123")
-	assert.NoError(t, err)
-	assert.NotEmpty(t, hashed)
-}
-
-func TestBCrypt_Hash_InvalidCost(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
-	bcrypt.Cost = 9999
-
-	hashed, err := bcrypt.Hash("test-123")
-	assert.Equal(t, "crypto/bcrypt: cost 9999 is outside allowed inclusive range 4..31", err.Error())
-	assert.Empty(t, hashed)
-}
-
-func TestBCrypt_Validate(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
-
-	hashed := "$2a$10$ey6hBBzIt1r1HQy6.hUihOCJ/6Ee9kLpFBD3P9of8is0RUwEL4uk6"
-	err := bcrypt.Validate(hashed, "test-123")
-	assert.NoError(t, err)
-}
-
-func TestBCrypt_Validate_Failed(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
-
-	hashed := "$2a$10$ey6hBBzIt1r1HQy6.hUihOCJ/6Ee9kLpFBD3P9of8is0RUwEL4uk6"
-	err := bcrypt.Validate(hashed, "different")
-	assert.Equal(t, "crypto/bcrypt: hashedPassword is not the hash of the given password", err.Error())
-}
-
-// reference hash generated with Python bcrypt
-func TestBCrypt_ReferenceVector(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
-
-	assert.NoError(t, bcrypt.Validate("$2b$10$cfbrCNkE/jOpUw8oDO6rWORakBkVoI1XW9TX1bQ2wbLmmeBmua03O", "test-123"))
+	assert.NoError(t, b.Validate(bcryptRef, "test-123"))
+	assert.ErrorIs(t, b.Validate(bcryptRef, "x"), ErrMismatch)
+	assert.ErrorIs(t, b.Validate("garbage", "x"), ErrInvalidHash)
+	assert.ErrorIs(t, b.Validate("", "x"), ErrInvalidHash)
 }
 
 func TestBCrypt_RoundTrip(t *testing.T) {
-	bcrypt := crypto.NewBCrypt()
+	b := &BCrypt{Cost: 4}
 
-	hashed, err := bcrypt.Hash("x")
+	hashed, err := b.Hash("x")
 	assert.NoError(t, err)
-	assert.NoError(t, bcrypt.Validate(hashed, "x"))
+	assert.NoError(t, b.Validate(hashed, "x"))
+	assert.False(t, b.NeedsRehash(hashed))
+	assert.True(t, NewBCrypt().NeedsRehash(hashed))
+	assert.True(t, b.NeedsRehash("garbage"))
 }
 
-func TestBCrypt_Hash_TooLong(t *testing.T) {
-	_, err := crypto.NewBCrypt().Hash(string(make([]byte, 73)))
+func TestBCrypt_Hash_Errors(t *testing.T) {
+	_, err := (&BCrypt{Cost: 9999}).Hash("x")
+	assert.Error(t, err)
+
+	_, err = (&BCrypt{Cost: 4}).Hash(string(make([]byte, 73)))
 	assert.Error(t, err)
 }

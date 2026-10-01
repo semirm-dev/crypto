@@ -4,104 +4,53 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
-	"errors"
 	"io"
 )
 
-// GCM encryption
+// GCM is AES-GCM authenticated encryption. Output is nonce || ciphertext || tag.
+// Nonces are random 96 bit values: rotate the key before ~2^32 messages.
 type GCM struct {
-	Secret string
+	aead cipher.AEAD
 }
 
-func NewGCM(secret string) *GCM {
-	return &GCM{
-		Secret: secret,
-	}
-}
-
-// Encrypt payload using AES GCM encryption mode, returns raw, hex and base64 encoded output
-func (gcmEnc *GCM) Encrypt(payload []byte) (string, string, string, error) {
-	return gcmEnc.EncryptAAD(payload, nil)
-}
-
-// EncryptAAD is Encrypt with additional authenticated data, which must be passed to DecryptAAD
-func (gcmEnc *GCM) EncryptAAD(payload, aad []byte) (string, string, string, error) {
-	key := []byte(gcmEnc.Secret)
-
+// NewGCM returns a GCM for a 16, 24 or 32 byte key (AES-128/192/256).
+func NewGCM(key []byte) (*GCM, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", "", "", err
+		return nil, err
 	}
 
-	gcm, err := cipher.NewGCM(block)
+	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", "", "", err
+		return nil, err
 	}
 
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", "", "", err
-	}
-
-	encrypted := gcm.Seal(nonce, nonce, payload, aad)
-
-	return string(encrypted), hex.EncodeToString(encrypted), base64.URLEncoding.EncodeToString(encrypted), nil
+	return &GCM{aead: aead}, nil
 }
 
-// Decrypt raw output of Encrypt
-func (gcmEnc *GCM) Decrypt(payload string) (string, error) {
-	return gcmEnc.DecryptAAD(payload, nil)
+// Encrypt plaintext, binding it to aad.
+func (g *GCM) Encrypt(plaintext, aad []byte) ([]byte, error) {
+	ns := g.aead.NonceSize()
+	out := make([]byte, ns, ns+len(plaintext)+g.aead.Overhead())
+
+	if _, err := io.ReadFull(rand.Reader, out); err != nil {
+		return nil, err
+	}
+
+	return g.aead.Seal(out, out[:ns], plaintext, aad), nil
 }
 
-// DecryptHex decrypts hex encoded output of Encrypt
-func (gcmEnc *GCM) DecryptHex(payload string) (string, error) {
-	raw, err := hex.DecodeString(payload)
+// Decrypt output of Encrypt. aad must match the value used for encryption.
+func (g *GCM) Decrypt(ciphertext, aad []byte) ([]byte, error) {
+	ns := g.aead.NonceSize()
+	if len(ciphertext) < ns+g.aead.Overhead() {
+		return nil, ErrDecrypt
+	}
+
+	out, err := g.aead.Open(nil, ciphertext[:ns], ciphertext[ns:], aad)
 	if err != nil {
-		return "", err
+		return nil, ErrDecrypt
 	}
 
-	return gcmEnc.Decrypt(string(raw))
-}
-
-// DecryptBase64 decrypts base64 (URL encoding) output of Encrypt
-func (gcmEnc *GCM) DecryptBase64(payload string) (string, error) {
-	raw, err := base64.URLEncoding.DecodeString(payload)
-	if err != nil {
-		return "", err
-	}
-
-	return gcmEnc.Decrypt(string(raw))
-}
-
-// DecryptAAD is Decrypt with additional authenticated data
-func (gcmEnc *GCM) DecryptAAD(payload string, aad []byte) (string, error) {
-	key := []byte(gcmEnc.Secret)
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	byteIn := []byte(payload)
-	nonceSize := gcm.NonceSize()
-
-	if len(byteIn) < nonceSize {
-		return "", errors.New("encrypted text too short")
-	}
-
-	nonce, encrypted := byteIn[:nonceSize], byteIn[nonceSize:]
-
-	decrypted, err := gcm.Open(nil, nonce, encrypted, aad)
-	if err != nil {
-		return "", err
-	}
-
-	return string(decrypted), nil
+	return out, nil
 }

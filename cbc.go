@@ -7,121 +7,104 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/binary"
 	"errors"
-	"hash"
 	"io"
 )
 
-// CBC encryption. Output is IV || ciphertext || HMAC-SHA256 (encrypt-then-MAC).
-// Prefer GCM for new code.
+// CBC is AES-CBC with PKCS#7 padding and HMAC-SHA256 (encrypt-then-MAC).
+// Output is iv || ciphertext || tag; the tag covers len(aad) || aad || iv || ciphertext.
+// Separate encryption and MAC keys are derived from the key.
+//
+// Deprecated: use GCM unless CBC is required for compatibility.
 type CBC struct {
-	Secret string // AES key: 16, 24 or 32 bytes
+	block  cipher.Block
+	macKey []byte
 }
 
-func NewCBC(secret string) *CBC {
-	return &CBC{Secret: secret}
-}
+// NewCBC returns a CBC for a 16, 24 or 32 byte key.
+func NewCBC(key []byte) (*CBC, error) {
+	if n := len(key); n != 16 && n != 24 && n != 32 {
+		return nil, aes.KeySizeError(n)
+	}
 
-// Encrypt content using AES encryption CBC mode with random IV, returns raw and hex encoded output
-func (cbcEnc *CBC) Encrypt(content []byte) (string, string, error) {
-	block, err := aes.NewCipher([]byte(cbcEnc.Secret))
+	block, err := aes.NewCipher(derive(key, "cbc-enc")[:len(key)])
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	byteIn := pkcsPad(content, aes.BlockSize)
-	out := make([]byte, aes.BlockSize+len(byteIn), aes.BlockSize+len(byteIn)+sha256.Size)
-
-	iv := out[:aes.BlockSize]
-	if _, err = io.ReadFull(rand.Reader, iv); err != nil {
-		return "", "", err
-	}
-
-	cipher.NewCBCEncrypter(block, iv).CryptBlocks(out[aes.BlockSize:], byteIn)
-	out = cbcEnc.mac(out).Sum(out)
-
-	return string(out), hex.EncodeToString(out), nil
+	return &CBC{block: block, macKey: derive(key, "cbc-mac")}, nil
 }
 
-// Decrypt raw output of Encrypt
-func (cbcEnc *CBC) Decrypt(encrypted string) (string, error) {
-	block, err := aes.NewCipher([]byte(cbcEnc.Secret))
+// Encrypt plaintext with a random IV, binding it to aad.
+func (c *CBC) Encrypt(plaintext, aad []byte) ([]byte, error) {
+	padLen := aes.BlockSize - len(plaintext)%aes.BlockSize
+	out := make([]byte, aes.BlockSize+len(plaintext)+padLen, aes.BlockSize+len(plaintext)+padLen+sha256.Size)
+
+	iv, body := out[:aes.BlockSize], out[aes.BlockSize:]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, err
+	}
+
+	copy(body, plaintext)
+	copy(body[len(plaintext):], bytes.Repeat([]byte{byte(padLen)}, padLen))
+	cipher.NewCBCEncrypter(c.block, iv).CryptBlocks(body, body)
+
+	return c.mac(out, aad), nil
+}
+
+// Decrypt output of Encrypt. aad must match the value used for encryption.
+func (c *CBC) Decrypt(ciphertext, aad []byte) ([]byte, error) {
+	n := len(ciphertext)
+	if n < 2*aes.BlockSize+sha256.Size || (n-sha256.Size)%aes.BlockSize != 0 {
+		return nil, ErrDecrypt
+	}
+
+	// full slice expression keeps mac from appending over the caller's tag
+	signed, tag := ciphertext[:n-sha256.Size:n-sha256.Size], ciphertext[n-sha256.Size:]
+	if !hmac.Equal(c.mac(signed, aad)[len(signed):], tag) {
+		return nil, ErrDecrypt
+	}
+
+	iv, body := signed[:aes.BlockSize], signed[aes.BlockSize:]
+	out := make([]byte, len(body))
+	cipher.NewCBCDecrypter(c.block, iv).CryptBlocks(out, body)
+
+	out, err := pkcsUnpad(out)
 	if err != nil {
-		return "", err
+		return nil, ErrDecrypt
 	}
 
-	byteIn := []byte(encrypted)
-	if len(byteIn) < 2*aes.BlockSize+sha256.Size || (len(byteIn)-sha256.Size)%aes.BlockSize != 0 {
-		return "", errors.New("invalid encrypted text length")
-	}
-
-	body, tag := byteIn[:len(byteIn)-sha256.Size], byteIn[len(byteIn)-sha256.Size:]
-	if !hmac.Equal(cbcEnc.mac(body).Sum(nil), tag) {
-		return "", errors.New("authentication failed")
-	}
-
-	iv, ct := body[:aes.BlockSize], body[aes.BlockSize:]
-	decrypted := make([]byte, len(ct))
-	cipher.NewCBCDecrypter(block, iv).CryptBlocks(decrypted, ct)
-
-	decrypted, err = pkcsUnPad(decrypted, aes.BlockSize)
-	if err != nil {
-		return "", err
-	}
-
-	return string(decrypted), nil
+	return out, nil
 }
 
-// DecryptHex decrypts hex encoded output of Encrypt
-func (cbcEnc *CBC) DecryptHex(encrypted string) (string, error) {
-	raw, err := hex.DecodeString(encrypted)
-	if err != nil {
-		return "", err
-	}
+// mac returns signed with its HMAC tag appended.
+func (c *CBC) mac(signed, aad []byte) []byte {
+	h := hmac.New(sha256.New, c.macKey)
+	h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(aad))))
+	h.Write(aad)
+	h.Write(signed)
 
-	return cbcEnc.Decrypt(string(raw))
+	return h.Sum(signed)
 }
 
-// mac returns HMAC primed with data, keyed by a key derived from Secret
-func (cbcEnc *CBC) mac(data []byte) hash.Hash {
-	kdf := hmac.New(sha256.New, []byte(cbcEnc.Secret))
-	kdf.Write([]byte("cbc-mac-key"))
+func pkcsUnpad(b []byte) ([]byte, error) {
+	if len(b) == 0 {
+		return nil, errors.New("empty")
+	}
 
-	m := hmac.New(sha256.New, kdf.Sum(nil))
-	m.Write(data)
+	pad := int(b[len(b)-1])
+	if pad == 0 || pad > aes.BlockSize || pad > len(b) || !bytes.Equal(b[len(b)-pad:], bytes.Repeat([]byte{byte(pad)}, pad)) {
+		return nil, errors.New("invalid padding")
+	}
 
-	return m
+	return b[:len(b)-pad], nil
 }
 
-// pkcsPad for non-full length blocks.
-// pkcs5 or pkcs7 will be used based on block size
-func pkcsPad(ciphertext []byte, blockSize int) []byte {
-	padding := blockSize - len(ciphertext)%blockSize
-	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+// derive returns HMAC-SHA256(key, label), used for key separation.
+func derive(key []byte, label string) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(label))
 
-	return append(append([]byte{}, ciphertext...), padtext...)
-}
-
-// pkcsUnPad will remove PKCS5 padding.
-// pkcs5 or pkcs7 will be used based on block size
-func pkcsUnPad(input []byte, blockSize int) ([]byte, error) {
-	inputLen := len(input)
-	if inputLen == 0 {
-		return nil, errors.New("cryptgo/padding: invalid padding size")
-	}
-
-	pad := input[inputLen-1]
-	padLen := int(pad)
-	if padLen == 0 || padLen > inputLen || padLen > blockSize {
-		return nil, errors.New("cryptgo/padding: invalid padding size")
-	}
-
-	for _, v := range input[inputLen-padLen : inputLen-1] {
-		if v != pad {
-			return nil, errors.New("cryptgo/padding: invalid padding")
-		}
-	}
-
-	return input[:inputLen-padLen], nil
+	return h.Sum(nil)
 }
