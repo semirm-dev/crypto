@@ -29,8 +29,6 @@ key, err = crypto.DeriveKey("passphrase", salt) // store salt (>= 8 bytes) next 
 | GCM | `nonce \|\| ciphertext \|\| tag` | Python `cryptography` |
 | CBC | `iv \|\| ciphertext \|\| HMAC-SHA256` (encrypt-then-MAC, separate derived keys, aad authenticated) | Python `cryptography` |
 
-`Validate` still accepts the legacy hex formats of Argon2 (`version$m$t$p$salt$hash`) and scrypt (`N$r$p$salt$hash`); `NeedsRehash` reports them as outdated.
-
 #### Safety properties
 - `Validate` bounds every parameter of an untrusted hash (Argon2 memory <= 256 MiB and time <= 10, scrypt 128*N*r <= 256 MiB, key length 16-1024) before doing any work, so crafted hashes cannot panic or exhaust memory. The decoders are fuzzed.
 - Salts must be at least 8 bytes. bcrypt rejects passwords over 72 bytes instead of truncating.

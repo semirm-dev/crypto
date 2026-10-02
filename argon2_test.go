@@ -31,10 +31,6 @@ func TestArgon2_Validate(t *testing.T) {
 	assert.NoError(t, a.Validate(argon2OpenSSL, "test-123"))
 	assert.ErrorIs(t, a.Validate(argon2OpenSSL, "test-124"), ErrMismatch)
 
-	// legacy hex format
-	legacy := "19$65536$3$2$73616c74$d8801786d6416fb063115b1b997ef50a56cd862a5e59062e2c6aadd301be102e"
-	assert.NoError(t, a.Validate(legacy, "test-123"))
-	assert.ErrorIs(t, a.Validate(legacy, "x"), ErrMismatch)
 }
 
 func TestArgon2_RoundTrip(t *testing.T) {
@@ -70,19 +66,6 @@ func TestArgon2_Validate_InvalidHash(t *testing.T) {
 	const salt, dk = "MDEyMzQ1Njc4OWFiY2RlZg", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	tests := []string{
 		"",
-		"19$",
-		"_$65536$3$2$73616c74$aa",
-		"0000$65536$3$2$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$_$3$2$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$_$2$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$3$_$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$3$2$_$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$3$2$73616c74$_",
-		"19$65536$3$0$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$0$2$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$3$256$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$4194304$3$2$73616c74$d8801786d6416fb063115b1b997ef50a",
-		"19$65536$3$2$73616c74$",
 		"$argon2i$v=19$m=65536,t=3,p=2$" + salt + "$" + dk,
 		"$argon2id$v=18$m=65536,t=3,p=2$" + salt + "$" + dk,
 		"$argon2id$v=x$m=65536,t=3,p=2$" + salt + "$" + dk,
@@ -110,12 +93,11 @@ func TestArgon2_NeedsRehash(t *testing.T) {
 
 	a.Time = 4
 	assert.True(t, a.NeedsRehash(argon2OpenSSL))
-	assert.True(t, NewArgon2().NeedsRehash("19$65536$3$2$73616c74$d8801786d6416fb063115b1b997ef50a56cd862a5e59062e2c6aadd301be102e"))
+	assert.True(t, NewArgon2().NeedsRehash(argon2OpenSSL)) // salt length 16 != default 32
 }
 
 func FuzzDecodeArgonHash(f *testing.F) {
 	f.Add(argon2OpenSSL)
-	f.Add("19$65536$3$2$73616c74$d8801786d6416fb063115b1b997ef50a")
 	f.Fuzz(func(t *testing.T, s string) {
 		p, salt, dk, err := decodeArgonHash(s)
 		if err != nil {

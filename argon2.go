@@ -3,7 +3,6 @@ package crypto
 import (
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -20,8 +19,7 @@ const (
 )
 
 // Argon2 hashes passwords with Argon2id. Hashes are PHC strings:
-// $argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash>. The legacy hex format
-// (version$m$t$p$salt$hash) is still accepted by Validate.
+// $argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash>.
 // Hashing uses Memory KiB per call, so limit concurrency in servers.
 type Argon2 struct {
 	Memory  uint32 // KiB
@@ -72,11 +70,11 @@ func (a *Argon2) Validate(hashed, plain string) error {
 	return nil
 }
 
-// NeedsRehash reports whether hashed is legacy, unparsable or uses other parameters than a.
+// NeedsRehash reports whether hashed is unparsable or uses other parameters than a.
 func (a *Argon2) NeedsRehash(hashed string) bool {
 	p, _, _, err := decodeArgonHash(hashed)
 
-	return err != nil || !strings.HasPrefix(hashed, "$") ||
+	return err != nil ||
 		p.Memory != a.Memory || p.Time != a.Time || p.Threads != a.Threads || p.SaltLen != a.SaltLen || p.KeyLen != a.KeyLen
 }
 
@@ -96,36 +94,22 @@ func (a *Argon2) validateParams() error {
 	return nil
 }
 
-// decodeArgonHash parses a PHC string or legacy hex hash into validated params, salt and key.
+// decodeArgonHash parses $argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash> into validated params, salt and key.
 func decodeArgonHash(encoded string) (*Argon2, []byte, []byte, error) {
-	var (
-		p         *Argon2
-		salt, dk  []byte
-		err       error
-		decodeErr = func(format string, args ...any) (*Argon2, []byte, []byte, error) {
-			return nil, nil, nil, invalidHash(format, args...)
-		}
-	)
-
-	if strings.HasPrefix(encoded, "$") {
-		p, salt, dk, err = decodePHCArgon(encoded)
-	} else {
-		p, salt, dk, err = decodeLegacyArgon(encoded)
-	}
+	p, salt, dk, err := parseArgonHash(encoded)
 	if err != nil {
-		return decodeErr("%v", err)
+		return nil, nil, nil, invalidHash("%v", err)
 	}
 
 	p.SaltLen, p.KeyLen = len(salt), uint32(len(dk))
 	if err = p.validateParams(); err != nil {
-		return decodeErr("%v", err)
+		return nil, nil, nil, invalidHash("%v", err)
 	}
 
 	return p, salt, dk, nil
 }
 
-// decodePHCArgon parses $argon2id$v=19$m=65536,t=3,p=2$<salt>$<hash>.
-func decodePHCArgon(encoded string) (*Argon2, []byte, []byte, error) {
+func parseArgonHash(encoded string) (*Argon2, []byte, []byte, error) {
 	values := strings.Split(encoded, "$")
 	if len(values) != 6 || values[1] != "argon2id" {
 		return nil, nil, nil, errors.New("not an argon2id hash")
@@ -157,47 +141,4 @@ func decodePHCArgon(encoded string) (*Argon2, []byte, []byte, error) {
 	}
 
 	return &Argon2{Memory: memory, Time: time, Threads: threads}, salt, dk, nil
-}
-
-// decodeLegacyArgon parses version$m$t$p$salt$hash with hex salt and key.
-func decodeLegacyArgon(encoded string) (*Argon2, []byte, []byte, error) {
-	values := strings.Split(encoded, "$")
-	if len(values) != 6 {
-		return nil, nil, nil, errors.New("invalid hash length")
-	}
-
-	version, err := strconv.Atoi(values[0])
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if version != argon2.Version {
-		return nil, nil, nil, errors.New("incompatible argon2 version")
-	}
-
-	memory, err := strconv.ParseUint(values[1], 10, 32)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	time, err := strconv.ParseUint(values[2], 10, 32)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	threads, err := strconv.ParseUint(values[3], 10, 8)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	salt, err := hex.DecodeString(values[4])
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	dk, err := hex.DecodeString(values[5])
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return &Argon2{Memory: uint32(memory), Time: uint32(time), Threads: uint8(threads)}, salt, dk, nil
 }

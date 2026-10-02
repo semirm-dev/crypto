@@ -3,11 +3,9 @@ package crypto
 import (
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/bits"
-	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/scrypt"
@@ -19,8 +17,7 @@ const (
 )
 
 // SCrypt hashes passwords with scrypt. Hashes look like
-// $scrypt$ln=15,r=8,p=1$<salt>$<hash>. The legacy hex format (N$r$p$salt$hash)
-// is still accepted by Validate.
+// $scrypt$ln=15,r=8,p=1$<salt>$<hash>.
 type SCrypt struct {
 	N       int // power of 2, ideally the highest that hashes within ~100ms
 	R       int
@@ -76,11 +73,11 @@ func (s *SCrypt) Validate(hashed, plain string) error {
 	return nil
 }
 
-// NeedsRehash reports whether hashed is legacy, unparsable or uses other parameters than s.
+// NeedsRehash reports whether hashed is unparsable or uses other parameters than s.
 func (s *SCrypt) NeedsRehash(hashed string) bool {
 	p, _, _, err := decodeSCryptHash(hashed)
 
-	return err != nil || !strings.HasPrefix(hashed, "$") ||
+	return err != nil ||
 		p.N != s.N || p.R != s.R || p.P != s.P || p.SaltLen != s.SaltLen || p.KeyLen != s.KeyLen
 }
 
@@ -100,19 +97,9 @@ func (s *SCrypt) validateParams() error {
 	return nil
 }
 
-// decodeSCryptHash parses a PHC-style or legacy hex hash into validated params, salt and key.
+// decodeSCryptHash parses $scrypt$ln=15,r=8,p=1$<salt>$<hash> into validated params, salt and key.
 func decodeSCryptHash(encoded string) (*SCrypt, []byte, []byte, error) {
-	var (
-		p        *SCrypt
-		salt, dk []byte
-		err      error
-	)
-
-	if strings.HasPrefix(encoded, "$") {
-		p, salt, dk, err = decodePHCSCrypt(encoded)
-	} else {
-		p, salt, dk, err = decodeLegacySCrypt(encoded)
-	}
+	p, salt, dk, err := parseSCryptHash(encoded)
 	if err != nil {
 		return nil, nil, nil, invalidHash("%v", err)
 	}
@@ -125,8 +112,7 @@ func decodeSCryptHash(encoded string) (*SCrypt, []byte, []byte, error) {
 	return p, salt, dk, nil
 }
 
-// decodePHCSCrypt parses $scrypt$ln=15,r=8,p=1$<salt>$<hash>.
-func decodePHCSCrypt(encoded string) (*SCrypt, []byte, []byte, error) {
+func parseSCryptHash(encoded string) (*SCrypt, []byte, []byte, error) {
 	values := strings.Split(encoded, "$")
 	if len(values) != 5 || values[1] != "scrypt" {
 		return nil, nil, nil, errors.New("not a scrypt hash")
@@ -149,37 +135,4 @@ func decodePHCSCrypt(encoded string) (*SCrypt, []byte, []byte, error) {
 	}
 
 	return &SCrypt{N: 1 << ln, R: r, P: p}, salt, dk, nil
-}
-
-// decodeLegacySCrypt parses N$r$p$salt$hash with hex salt and key.
-func decodeLegacySCrypt(encoded string) (*SCrypt, []byte, []byte, error) {
-	values := strings.Split(encoded, "$")
-	if len(values) != 5 {
-		return nil, nil, nil, errors.New("invalid hash length")
-	}
-
-	s := &SCrypt{}
-	var err error
-
-	if s.N, err = strconv.Atoi(values[0]); err != nil {
-		return nil, nil, nil, err
-	}
-	if s.R, err = strconv.Atoi(values[1]); err != nil {
-		return nil, nil, nil, err
-	}
-	if s.P, err = strconv.Atoi(values[2]); err != nil {
-		return nil, nil, nil, err
-	}
-
-	salt, err := hex.DecodeString(values[3])
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	dk, err := hex.DecodeString(values[4])
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return s, salt, dk, nil
 }
