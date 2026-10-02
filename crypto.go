@@ -1,4 +1,4 @@
-// Package crypto provides password hashing (Argon2id, scrypt, bcrypt) and
+// Package crypto provides password hashing (Argon2id, scrypt) and
 // authenticated encryption (AES-GCM) with safe defaults.
 //
 // Hashers validate every parameter before doing work, so hashes from untrusted

@@ -8,7 +8,7 @@ import (
 )
 
 func BenchmarkHash(b *testing.B) {
-	hash := map[string]func(string) (string, error){"argon2": NewArgon2().Hash, "scrypt": NewSCrypt().Hash, "bcrypt": NewBCrypt().Hash}
+	hash := map[string]func(string) (string, error){"argon2": NewArgon2().Hash, "scrypt": NewSCrypt().Hash}
 	for name, fn := range hash {
 		b.Run(name, func(b *testing.B) {
 			for b.Loop() {
@@ -35,7 +35,7 @@ func TestConcurrentUse(t *testing.T) {
 		Hash(string) (string, error)
 		Validate(string, string) error
 	}
-	hashers := []hasher{&Argon2{Memory: 1024, Time: 1, Threads: 1, SaltLen: 16, KeyLen: 32}, &SCrypt{N: 1024, R: 8, P: 1, SaltLen: 16, KeyLen: 32}, &BCrypt{Cost: 4}}
+	hashers := []hasher{&Argon2{Memory: 1024, Time: 1, Threads: 1, SaltLen: 16, KeyLen: 32}, &SCrypt{N: 1024, R: 8, P: 1, SaltLen: 16, KeyLen: 32}}
 	gcm, _ := NewGCM(testKey)
 
 	var wg sync.WaitGroup
