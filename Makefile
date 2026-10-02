@@ -13,7 +13,7 @@ bench:
 fuzz:
 	go test -run '^$$' -fuzz FuzzDecodeArgonHash -fuzztime 30s
 	go test -run '^$$' -fuzz FuzzDecodeSCryptHash -fuzztime 30s
-	go test -run '^$$' -fuzz FuzzCiphersDecrypt -fuzztime 30s
+	go test -run '^$$' -fuzz FuzzGCMDecrypt -fuzztime 30s
 
 lint:
 	go vet ./... && gofmt -l .

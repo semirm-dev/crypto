@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base64"
 	"io"
 )
 
@@ -53,4 +54,29 @@ func (g *GCM) Decrypt(ciphertext, aad []byte) ([]byte, error) {
 	}
 
 	return out, nil
+}
+
+// EncryptString encrypts s and returns unpadded URL-safe base64.
+func (g *GCM) EncryptString(s string, aad []byte) (string, error) {
+	out, err := g.Encrypt([]byte(s), aad)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(out), nil
+}
+
+// DecryptString is the inverse of EncryptString.
+func (g *GCM) DecryptString(s string, aad []byte) (string, error) {
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(s)
+	if err != nil {
+		return "", ErrDecrypt
+	}
+
+	out, err := g.Decrypt(raw, aad)
+	if err != nil {
+		return "", err
+	}
+
+	return string(out), nil
 }
