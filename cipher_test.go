@@ -12,10 +12,8 @@ var testKey = []byte("3t6w9z$C&F)J@NcR")
 func newCiphers(t *testing.T, key []byte) map[string]Cipher {
 	gcm, err := NewGCM(key)
 	assert.NoError(t, err)
-	cbc, err := NewCBC(key)
-	assert.NoError(t, err)
 
-	return map[string]Cipher{"gcm": gcm, "cbc": cbc}
+	return map[string]Cipher{"gcm": gcm}
 }
 
 func TestCiphers_RoundTrip(t *testing.T) {
@@ -86,8 +84,6 @@ func TestCiphers_KeySizes(t *testing.T) {
 	for _, n := range []int{0, 15, 17, 33} {
 		_, err := NewGCM(make([]byte, n))
 		assert.Error(t, err)
-		_, err = NewCBC(make([]byte, n))
-		assert.Error(t, err)
 	}
 }
 
@@ -97,17 +93,6 @@ func TestGCM_ReferenceVector(t *testing.T) {
 	ct, _ := hex.DecodeString("000102030405060708090a0be18ba3bf8aeba0305005b0b7e5375acee682d8e7edf2ce64")
 
 	pt, err := gcm.Decrypt(ct, []byte("ctx"))
-	assert.NoError(t, err)
-	assert.Equal(t, "test-123", string(pt))
-}
-
-// reference value built with Python cryptography: AES-CBC PKCS7 + HMAC-SHA256, iv 00..0f, aad "ctx",
-// keys derived as HMAC-SHA256(key, "cbc-enc"/"cbc-mac")
-func TestCBC_ReferenceVector(t *testing.T) {
-	cbc, _ := NewCBC(testKey)
-	ct, _ := hex.DecodeString("000102030405060708090a0b0c0d0e0fa39f5d0766753067896b3b2ff5005dbcc121766b962be8f7402c0f45ebaafe1f1b585b701570c148d1fdd6e4c4370ffe")
-
-	pt, err := cbc.Decrypt(ct, []byte("ctx"))
 	assert.NoError(t, err)
 	assert.Equal(t, "test-123", string(pt))
 }
@@ -131,16 +116,11 @@ func TestStringHelpers(t *testing.T) {
 
 func FuzzCiphersDecrypt(f *testing.F) {
 	gcm, _ := NewGCM(testKey)
-	cbc, _ := NewCBC(testKey)
-	for _, c := range []Cipher{gcm, cbc} {
-		ct, _ := c.Encrypt([]byte("test-123"), nil)
-		f.Add(ct)
-	}
+	ct, _ := gcm.Encrypt([]byte("test-123"), nil)
+	f.Add(ct)
 	f.Fuzz(func(t *testing.T, ct []byte) {
-		for _, c := range []Cipher{gcm, cbc} {
-			if _, err := c.Decrypt(ct, nil); err != nil {
-				assert.ErrorIs(t, err, ErrDecrypt)
-			}
+		if _, err := gcm.Decrypt(ct, nil); err != nil {
+			assert.ErrorIs(t, err, ErrDecrypt)
 		}
 	})
 }

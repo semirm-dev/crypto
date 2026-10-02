@@ -1,5 +1,5 @@
 // Package crypto provides password hashing (Argon2id, scrypt, bcrypt) and
-// authenticated encryption (AES-GCM, AES-CBC with HMAC) with safe defaults.
+// authenticated encryption (AES-GCM) with safe defaults.
 //
 // Hashers validate every parameter before doing work, so hashes from untrusted
 // sources cannot trigger panics or unbounded memory use. Ciphers are immutable
@@ -43,7 +43,6 @@ var (
 	_ Hasher = (*SCrypt)(nil)
 	_ Hasher = (*BCrypt)(nil)
 	_ Cipher = (*GCM)(nil)
-	_ Cipher = (*CBC)(nil)
 )
 
 // EncryptString encrypts s with c and returns unpadded URL-safe base64.

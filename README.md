@@ -1,6 +1,6 @@
 ![Go](https://img.shields.io/github/go-mod/go-version/semirm-dev/crypto)
 
-Password hashing (Argon2id, scrypt, bcrypt) and authenticated encryption (AES-GCM, AES-CBC+HMAC) with safe defaults.
+Password hashing (Argon2id, scrypt, bcrypt) and authenticated encryption (AES-GCM) with safe defaults.
 
 ```go
 // password hashing: every hasher implements crypto.Hasher
@@ -27,7 +27,6 @@ key, err = crypto.DeriveKey("passphrase", salt) // store salt (>= 8 bytes) next 
 | scrypt | `$scrypt$ln=15,r=8,p=1$<salt>$<hash>` | RFC 7914, Python `hashlib` |
 | bcrypt | `$2b$12$...` | Python `bcrypt` |
 | GCM | `nonce \|\| ciphertext \|\| tag` | Python `cryptography` |
-| CBC | `iv \|\| ciphertext \|\| HMAC-SHA256` (encrypt-then-MAC, separate derived keys, aad authenticated) | Python `cryptography` |
 
 #### Safety properties
 - `Validate` bounds every parameter of an untrusted hash (Argon2 memory <= 256 MiB and time <= 10, scrypt 128*N*r <= 256 MiB, key length 16-1024) before doing any work, so crafted hashes cannot panic or exhaust memory. The decoders are fuzzed.
@@ -36,7 +35,6 @@ key, err = crypto.DeriveKey("passphrase", salt) // store salt (>= 8 bytes) next 
 - Hashers keep no state between calls; ciphers are immutable after construction. Both are safe for concurrent use.
 - Argon2 uses 64 MiB per hash by default: limit concurrent hashes in servers, and rate-limit login endpoints.
 - GCM uses random 96-bit nonces: rotate the key before ~2^32 messages per key.
-- `CBC` is deprecated and only for compatibility; use `GCM`.
 
 #### Development
 ```shell
